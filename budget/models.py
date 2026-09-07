@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
@@ -48,7 +48,7 @@ class Budget(models.Model):
 
     @property
     def saving(self):
-        return ((self.food + self.transport + self.phone + self.other) * Decimal(self.cut) / 100).quantize(Decimal('.01'))
+        return ((self.food + self.transport + self.phone + self.other) * Decimal(self.cut) / 100).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
 
     def __str__(self):
         return f'{self.user_id}: {self.month:%Y-%m}'

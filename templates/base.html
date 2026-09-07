@@ -1,4 +1,39 @@
 {% load static %}
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Dein Haushaltsbudget für Österreich. Einnahmen und Ausgaben verstehen und Sparziele durchrechnen."><title>Mehr übrig — Dein Budget. Dein Spielraum.</title><link rel="stylesheet" href="{% static 'style.css' %}"></head><body>
-<header><a class="brand" href="./"><span class="logo">m<span>↗</span></span>mehr übrig<span class="at">AT</span></a><span class="header-note">Weniger rechnen. Mehr Überblick.</span>{% if user.is_authenticated %}<span class="account">{{ user.username }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="outline" type="submit">Abmelden</button></form>{% else %}<a class="outline" href="{% url 'login' %}">Anmelden</a>{% endif %}</header>
-<main>{% if messages %}<div class="messages" role="status">{% for message in messages %}<p>{{ message }}</p>{% endfor %}</div>{% endif %}{% block content %}{% endblock %}<footer><a class="brand footer-brand" href="{% url 'dashboard' %}">mehr übrig<span class="at">AT</span></a><p>Ein Budgetplaner für Österreich. Alle Beträge in Euro. Deine Eingaben werden erst beim Speichern in deinem Konto abgelegt.</p></footer></main>{% block scripts %}{% endblock %}</body></html>
+<!doctype html>
+<html lang="de-AT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#7055e8">
+  <meta name="description" content="Mehr Überblick über dein Geld. Plane dein Monatsbudget, vergleiche Ausgaben und entdecke deinen Spielraum.">
+  <title>{% block title %}Dein Budget{% endblock %} · Mehr übrig</title>
+  <link rel="icon" href="{% static 'favicon.svg' %}" type="image/svg+xml">
+  <link rel="stylesheet" href="{% static 'style.css' %}">
+</head>
+<body>
+<a class="skip-link" href="#main">Zum Inhalt</a>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="{% url 'dashboard' %}"><span class="brand-mark" aria-hidden="true">m<span>↗</span></span><span>mehr übrig<span class="brand-caption">DEIN GELD. DEIN SPIELRAUM.</span></span></a>
+    <div class="sidebar-label">DEIN BEREICH</div>
+    <nav aria-label="Hauptnavigation" class="main-nav">
+      <a class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}"><span aria-hidden="true">▦</span> Monatsbudget</a>
+      {% if user.is_authenticated %}<a class="nav-item" href="{% url 'password_change' %}"><span aria-hidden="true">⚙</span> Passwort ändern</a>{% else %}<a class="nav-item" href="{% url 'login' %}"><span aria-hidden="true">↪</span> Anmelden</a>{% endif %}
+    </nav>
+    {% if history %}<div class="sidebar-label">GESPEICHERTE MONATE</div><nav class="month-history" aria-label="Gespeicherte Monate">{% for item in history %}<a href="{% url 'dashboard' %}?month={{ item.month|date:'Y-m' }}" {% if item.month|date:'Y-m' == month %}aria-current="page"{% endif %}><span>{{ item.month|date:'F Y' }}</span><span aria-hidden="true">↗</span></a>{% endfor %}</nav>{% endif %}
+    <div class="sidebar-bottom"><span class="country"><span aria-hidden="true">🇦🇹</span> Für deinen Alltag in Österreich</span><p>Ein klarer Blick aufs Budget.<br>Ein bisschen mehr Luft.</p></div>
+  </aside>
+  <div class="page-shell">
+    <header class="topbar"><a class="mobile-brand" href="{% url 'dashboard' %}">mehr übrig<span>↗</span></a><span class="breadcrumb">Dein Bereich <span>/</span> {% block breadcrumb %}Monatsbudget{% endblock %}</span>
+      <div class="account-actions">{% if user.is_authenticated %}<span class="avatar" aria-hidden="true">{{ user.username|first|upper }}</span><span class="account-name">{{ user.username }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="text-button" type="submit">Abmelden</button></form>{% else %}<span class="preview-badge">Vorschau</span><a class="button button-small" href="{% url 'login' %}">Anmelden <span aria-hidden="true">↗</span></a>{% endif %}</div>
+    </header>
+    <main id="main" tabindex="-1">
+      {% if messages %}<div class="messages" role="status">{% for message in messages %}<p><span aria-hidden="true">✓</span> {{ message }}</p>{% endfor %}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="footer"><span>Mehr übrig <span class="footer-dot">·</span> Klar planen. Bewusst ausgeben.</span><span>Alle Beträge in Euro.</span></footer>
+  </div>
+</div>
+<script src="{% static 'site.js' %}" defer></script>
+{% block scripts %}{% endblock %}
+</body></html>

@@ -28,7 +28,7 @@ class BudgetTests(TestCase):
         self.assertEqual(budget.remaining, Decimal('-705'))
 
     def test_guest_can_preview_but_cannot_save(self):
-        self.assertContains(self.client.get('/'), 'Was bleibt für dich?')
+        self.assertContains(self.client.get('/'), 'Dein Geld. Dein Plan')
         response = self.client.post('/', self.payload())
         self.assertRedirects(response, reverse('login'))
         self.assertFalse(Budget.objects.exists())
@@ -80,7 +80,7 @@ class BudgetTests(TestCase):
 
     def test_registration_login_and_post_logout(self):
         response = self.client.post(reverse('register'), {
-            'username': 'newuser', 'password1': 'Some-unique-passphrase-891!', 'password2': 'Some-unique-passphrase-891!',
+            'username': 'newuser', 'email': 'new@example.com', 'password1': 'Some-unique-passphrase-891!', 'password2': 'Some-unique-passphrase-891!',
         })
         self.assertRedirects(response, '/')
         self.assertIn('_auth_user_id', self.client.session)
@@ -98,3 +98,107 @@ class BudgetTests(TestCase):
         form = BudgetForm(self.payload())
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data['month'], date(2026, 9, 1))
+
+    def test_budget_fields_render_without_javascript(self):
+        response = self.client.get('/')
+        for key in MONEY_FIELDS:
+            self.assertContains(response, f'name="{key}"')
+        self.client.force_login(self.user)
+        self.client.post('/', self.payload(food='', other=''))
+        record = Budget.objects.get(user=self.user)
+        self.assertEqual(record.food, Decimal('0'))
+        self.assertEqual(record.other, Decimal('0'))
+
+    def test_delete_requires_confirmation_and_ownership(self):
+        record = Budget.objects.create(user=self.user, month=date(2026, 9, 1))
+        self.client.force_login(self.other)
+        url = reverse('delete_budget', args=[record.pk])
+        self.assertEqual(self.client.post(url).status_code, 404)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertTrue(Budget.objects.filter(pk=record.pk).exists())
+        self.assertEqual(self.client.post(url).status_code, 302)
+        self.assertFalse(Budget.objects.filter(pk=record.pk).exists())
+
+    def test_csv_contains_only_the_owned_saved_budget(self):
+        record = Budget.objects.create(user=self.user, month=date(2026, 9, 1), income='2000.45')
+        url = reverse('export_budget', args=[record.pk])
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_login(self.user)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('attachment', response.headers['Content-Disposition'])
+        self.assertIn('2000,45', response.content.decode())
+        self.assertIn('no-store', response.headers['Cache-Control'])
+
+    def test_password_reset_email_and_token_work_end_to_end(self):
+        import re
+        from django.core import mail
+        from django.test import override_settings
+        self.user.email = 'mario@example.com'
+        self.user.save()
+        with override_settings(PASSWORD_RESET_ENABLED=True, EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend'):
+            response = self.client.post(reverse('password_reset'), {'email': self.user.email})
+            self.assertRedirects(response, reverse('password_reset_done'))
+            self.assertEqual(len(mail.outbox), 1)
+            link = re.search(r'http://testserver([^\s]+)', mail.outbox[0].body).group(1)
+            response = self.client.get(link)
+            self.assertEqual(response.status_code, 302)
+            reset_url = response.url
+            self.assertContains(self.client.get(reset_url), 'Wähle ein neues Passwort')
+            password = 'Brand-new-passphrase-2026!'
+            self.assertRedirects(self.client.post(reset_url, {'new_password1': password, 'new_password2': password}), reverse('password_reset_complete'))
+            self.user.refresh_from_db()
+            self.assertTrue(self.user.check_password(password))
+            self.assertContains(self.client.get(link), 'abgelaufen')
+
+    def test_reset_without_email_service_is_honest(self):
+        from django.test import override_settings
+        with override_settings(PASSWORD_RESET_ENABLED=False):
+            response = self.client.post(reverse('password_reset'), {'email': 'x@example.com'})
+            self.assertEqual(response.status_code, 503)
+            self.assertContains(response, 'noch nicht eingerichtet', status_code=503)
+
+    def test_login_lockout_cannot_be_bypassed_by_cookie_or_user_agent_rotation(self):
+        from django.test import override_settings
+        with override_settings(AXES_FAILURE_LIMIT=3):
+            for attempt in range(3):
+                response = Client().post(reverse('login'), {'username': self.user.username, 'password': 'wrong'}, HTTP_USER_AGENT=f'browser-{attempt}')
+            self.assertEqual(response.status_code, 429)
+            response = Client().post(reverse('login'), {'username': self.user.username, 'password': 'test-long-password-821!'}, HTTP_USER_AGENT='another-browser')
+            self.assertEqual(response.status_code, 429)
+            response = Client().post(reverse('login'), {'username': self.other.username, 'password': 'test-long-password-456!'})
+            self.assertEqual(response.status_code, 302)
+
+    def test_password_change_preserves_session(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse('password_change'), {
+            'old_password': 'test-long-password-821!',
+            'new_password1': 'Changed-even-longer-827!', 'new_password2': 'Changed-even-longer-827!',
+        })
+        self.assertRedirects(response, reverse('password_change_done'))
+        self.assertIn('_auth_user_id', self.client.session)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('Changed-even-longer-827!'))
+
+    def test_health_detects_database_failure_without_leaking_details(self):
+        from unittest.mock import patch
+        from django.db import OperationalError
+        self.assertEqual(self.client.get(reverse('health')).json(), {'status': 'ok'})
+        with patch('budget.views.connection.cursor', side_effect=OperationalError('private-credentials')):
+            response = self.client.get(reverse('health'))
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn('private-credentials', response.content.decode())
+
+    def test_production_https_redirect_and_cookie_flags(self):
+        from django.test import override_settings
+        with override_settings(SECURE_SSL_REDIRECT=True, SESSION_COOKIE_SECURE=True, CSRF_COOKIE_SECURE=True):
+            self.assertEqual(self.client.get('/').status_code, 301)
+            response = self.client.get('/', secure=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.cookies['csrftoken']['secure'])
+
+    def test_round_half_up_matches_frontend(self):
+        record = Budget(food=Decimal('0.10'), other=Decimal('0.20'), cut=5)
+        self.assertEqual(record.saving, Decimal('0.02'))
